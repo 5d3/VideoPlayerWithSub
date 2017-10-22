@@ -1,6 +1,8 @@
 package com.example.josh.mainactivity;
 
 import android.Manifest;
+import android.content.Context;
+import android.os.AsyncTask;
 import android.os.Environment;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -10,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.Collection;
 
 import android.media.AudioManager;
 import android.media.MediaPlayer;
@@ -17,7 +20,9 @@ import android.media.MediaPlayer.OnCompletionListener;
 import android.media.MediaPlayer.OnErrorListener;
 import android.media.MediaPlayer.OnPreparedListener;
 import android.os.Bundle;
+import android.os.Handler;
 import android.app.Activity;
+import android.text.Html;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -30,10 +35,13 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.SeekBar.OnSeekBarChangeListener;
+import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.FrameLayout;
 
 import com.example.utils.TimedTextObject;
 import com.example.utils.FormatSRT;
+import com.example.utils.Caption;
 
 import static android.support.v4.content.PermissionChecker.PERMISSION_GRANTED;
 
@@ -45,11 +53,13 @@ public class MainActivity extends Activity {
     private SurfaceView sv;
     private Button btn_play, btn_pause, btn_replay, btn_stop;
     private MediaPlayer mediaPlayer;
+    private TextView subtitleText;
     private SeekBar seekBar;
     private int currentPosition = 0;
     private boolean isPlaying;
     private TimedTextObject mSRT;
     private GestureDetector gestureDetector;
+    private SubtitleProcessingTask subsFetchTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +82,8 @@ public class MainActivity extends Activity {
 
         // 为SurfaceHolder添加回调
         sv.getHolder().addCallback(callback);
+        subtitleText = (TextView) findViewById(R.id.offLine_subtitleText);
+
 
         // 4.0版本之下需要设置的属性
         // 设置Surface不维护自己的缓冲区，而是等待屏幕的渲染引擎将内容推送到界面
@@ -92,6 +104,18 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+
+        /*
+		 * Adjust subtitles margin based on Screen dimes
+		 */
+        FrameLayout.LayoutParams rl2 = (FrameLayout.LayoutParams) subtitleText.getLayoutParams();
+        DisplayMetrics dm = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(dm);
+        rl2.bottomMargin = (int) (dm.heightPixels * 0.01);
+        subtitleText.setLayoutParams(rl2);
+
+        subtitleText.setText("abcde abcdefg abc abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz");
+        subtitleText.setBackgroundColor(0xe1);
     }
 /*
     //Add gesture support for MainActivity  @joshjliu
@@ -224,6 +248,9 @@ public class MainActivity extends Activity {
 //        if(PERMISSION_GRANTED == permissionCheck) {
 //
 //        }
+        // The following code is a sample of getApplicationContext()     @joshjliu
+        //Context ctx = getApplicationContext();
+
         try {
             mediaPlayer = new MediaPlayer();
             mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
@@ -238,6 +265,9 @@ public class MainActivity extends Activity {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
                     Log.i(TAG, "装载完成");
+                    subsFetchTask = new SubtitleProcessingTask();
+                    subsFetchTask.execute();
+
                     mediaPlayer.start();
                     // 按照初始位置播放
                     mediaPlayer.seekTo(msec);
@@ -426,6 +456,95 @@ public class MainActivity extends Activity {
         @Override
         public boolean onDown(MotionEvent e) {
             return true;
+        }
+    }
+
+
+
+    public void onTimedText(Caption text) {
+        if (text == null) {
+            subtitleText.setVisibility(View.INVISIBLE);
+            return;
+        }
+        subtitleText.setText(Html.fromHtml(text.content));
+        subtitleText.setVisibility(View.VISIBLE);
+    }
+
+    // Refer to: https://srihary.com/2014/09/03/subtitles-support-to-android-mediaplayer-across-any-os-version/
+    private Runnable subtitleProcessesor = new Runnable() {
+
+        @Override
+        public void run() {
+            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                int currentPos = mediaPlayer.getCurrentPosition();
+                Collection<Caption> subtitles = mSRT.captions.values();
+                for (Caption caption : subtitles) {
+                    if (currentPos >= caption.start.mseconds
+                            && currentPos <= caption.end.mseconds) {
+                        onTimedText(caption);
+                        break;
+                    } else if (currentPos > caption.end.mseconds) {
+                        onTimedText(null);
+                    }
+                }
+            }
+            subtitleDisplayHandler.postDelayed(this, 100);
+        }
+    };
+
+    private Handler subtitleDisplayHandler = new Handler();
+    private boolean mDragging;
+
+    public class SubtitleProcessingTask extends AsyncTask<Void, Void, Void> {
+
+        @Override
+        protected void onPreExecute() {
+            subtitleText.setText("Loading subtitles..");
+            super.onPreExecute();
+        }
+
+        @Override
+        protected Void doInBackground(Void... params) {
+            // int count;
+            try {
+				/*
+				 * if you want to download file from Internet, use commented
+				 * code.
+				 */
+                // URL url = new URL(
+                // "https://dozeu380nojz8.cloudfront.net/uploads/video/subtitle_file/3533/srt_919a069ace_boss.srt");
+                // InputStream is = url.openStream();
+                // File f = getExternalFile();
+                // FileOutputStream fos = new FileOutputStream(f);
+                // byte data[] = new byte[1024];
+                // while ((count = is.read(data)) != -1) {
+                // fos.write(data, 0, count);
+                // }
+                // is.close();
+                // fos.close();
+                /*
+                InputStream stream = getResources().openRawResource(
+                        R.raw.jellies_subs);
+                FormatSRT formatSRT = new FormatSRT();
+                srt = formatSRT.parseFile("sample.srt", stream);
+                */
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                Log.e(TAG, "error in downloadinf subs");
+            }
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void result) {
+            if (null != mSRT) {
+                subtitleText.setText("");
+                Toast.makeText(getApplicationContext(), "subtitles loaded!!",
+                        Toast.LENGTH_SHORT).show();
+                subtitleDisplayHandler.post(subtitleProcessesor);
+            }
+            super.onPostExecute(result);
         }
     }
 }
